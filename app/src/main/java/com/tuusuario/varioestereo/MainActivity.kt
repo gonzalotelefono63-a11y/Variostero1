@@ -14,9 +14,14 @@ import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioTrack
 import android.os.Bundle
+import android.os.PowerManager
+import android.view.WindowManager
+import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
+import android.graphics.Color
+import android.view.Gravity
 import kotlin.math.abs
 import kotlin.math.pow
 import kotlin.math.sin
@@ -26,7 +31,15 @@ class MainActivity : AppCompatActivity(), SensorEventListener, LocationListener 
     private lateinit var sensorManager: SensorManager
     private var pressureSensor: Sensor? = null
     private lateinit var locationManager: LocationManager
-    private lateinit var textView: TextView
+    
+    // Elementos de la Interfaz Visual (Dashboard)
+    private lateinit var txtVz: TextView
+    private lateinit var txtAltitude: TextView
+    private lateinit var txtSpeed: TextView
+    private lateinit var txtHeading: TextView
+
+    // WakeLock para evitar que la pantalla se apague en vuelo
+    private var wakeLock: PowerManager.WakeLock? = null
 
     // Variables de vuelo
     private var baselinePressure: Float = 1013.25f
@@ -45,23 +58,69 @@ class MainActivity : AppCompatActivity(), SensorEventListener, LocationListener 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
-        textView = TextView(this).apply {
-            text = "Iniciando Vario Estéreo..."
-            textSize = 18f
-            setPadding(40, 40, 40, 40)
-        }
-        setContentView(textView)
+        // Mantener la pantalla encendida permanentemente (WakeLock de pantalla)
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        
+        val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+        wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "VarioEstereo::FlightWakeLock")
+        wakeLock?.acquire()
+
+        // Construir Dashboard visual de alto contraste para vuelo
+        setupDashboardUI()
 
         sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
         pressureSensor = sensorManager.getDefaultSensor(Sensor.TYPE_PRESSURE)
         locationManager = getSystemService(Context.LOCATION_SERVICE) as LocationManager
 
-        if (pressureSensor == null) {
-            textView.text = "Error: Este dispositivo no detecta un barómetro."
-        }
-
         setupStereoAudio()
         checkLocationPermission()
+    }
+
+    private fun setupDashboardUI() {
+        val layout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(Color.BLACK)
+            gravity = Gravity.CENTER
+            setPadding(30, 30, 30, 30)
+        }
+
+        txtVz = TextView(this).apply {
+            text = "0.00 m/s"
+            textSize = 52f
+            setTextColor(Color.GREEN)
+            gravity = Gravity.CENTER
+        }
+
+        txtAltitude = TextView(this).apply {
+            text = "Alt: 0 m"
+            textSize = 28f
+            setTextColor(Color.WHITE)
+            gravity = Gravity.CENTER
+            setPadding(0, 20, 0, 20)
+        }
+
+        txtSpeed = TextView(this).apply {
+            text = "GPS: 0 km/h"
+            textSize = 24f
+            setTextColor(Color.YELLOW)
+            gravity = Gravity.CENTER
+            setPadding(0, 10, 0, 10)
+        }
+
+        txtHeading = TextView(this).apply {
+            text = "Rumbo: 0°"
+            textSize = 24f
+            setTextColor(Color.CYAN)
+            gravity = Gravity.CENTER
+            setPadding(0, 10, 0, 20)
+        }
+
+        layout.addView(txtVz)
+        layout.addView(txtAltitude)
+        layout.addView(txtSpeed)
+        layout.addView(txtHeading)
+
+        setContentView(layout)
     }
 
     private fun setupStereoAudio() {
@@ -95,16 +154,14 @@ class MainActivity : AppCompatActivity(), SensorEventListener, LocationListener 
     private fun startAudioLoop() {
         isAudioRunning = true
         audioThread = Thread {
-            val chunkDurationMs = 50 // trozos pequeños de 50ms
+            val chunkDurationMs = 50
             val numSamples = (sampleRate * chunkDurationMs) / 1000
-            val buffer = ByteArray(numSamples * 4) // Estéreo 16-bit (4 bytes por frame)
-            
+            val buffer = ByteArray(numSamples * 4)
             var phase = 0.0
 
             while (isAudioRunning) {
                 val vz = verticalSpeed
                 
-                // Si estamos ascendiendo o descendiendo activamente
                 if (abs(vz) > 0.05f) {
                     val freq = if (vz > 0) {
                         (400 + (vz * 200)).toInt().coerceIn(400, 1200)
@@ -112,13 +169,14 @@ class MainActivity : AppCompatActivity(), SensorEventListener, LocationListener 
                         (250 - (abs(vz) * 30)).toInt().coerceIn(150, 250)
                     }
 
-                    // Generar onda estéreo balanceada (listo para paneo izquierdo/derecho en el futuro)
+                    // Preparado para estéreo diferencial: aquí en el futuro ajustaremos 
+                    // leftVol y rightVol según la posición relativa de la térmica.
                     val leftVol = 1.0f
                     val rightVol = 1.0f
 
                     for (i in 0 until numSamples) {
                         val angle = 2.0 * Math.PI * freq * i / sampleRate + phase
-                        val baseSample = (sin(angle) * 15000).toInt() // Volumen moderado
+                        val baseSample = (sin(angle) * 15000).toInt()
                         
                         val leftSample = (baseSample * leftVol).toInt().toShort()
                         val rightSample = (baseSample * rightVol).toInt().toShort()
@@ -131,7 +189,6 @@ class MainActivity : AppCompatActivity(), SensorEventListener, LocationListener 
                     phase = (phase + 2.0 * Math.PI * freq * numSamples / sampleRate) % (2.0 * Math.PI)
                     audioTrack?.write(buffer, 0, buffer.size)
                 } else {
-                    // Silencio si está estable, rellenando con ceros para mantener activo el stream de audio
                     buffer.fill(0)
                     audioTrack?.write(buffer, 0, buffer.size)
                     try {
@@ -184,6 +241,9 @@ class MainActivity : AppCompatActivity(), SensorEventListener, LocationListener 
         audioThread?.join(500)
         audioTrack?.stop()
         audioTrack?.release()
+        if (wakeLock?.isHeld == true) {
+            wakeLock?.release()
+        }
     }
 
     override fun onSensorChanged(event: SensorEvent) {
@@ -203,15 +263,12 @@ class MainActivity : AppCompatActivity(), SensorEventListener, LocationListener 
             lastAltitude = altitude
             lastTime = currentTime
 
-            textView.text = """
-                ✈️ VARIO ESTÉREO (HILO ACTIVO)
-                
-                Presión: %.2f hPa
-                Altitud: %.1f m
-                Vz: %.2f m/s
-                Velocidad GPS: %.1f km/h
-                Rumbo: %.0f°
-            """.trimIndent().format(pressure, altitude, verticalSpeed, groundSpeed * 3.6f, heading)
+            // Actualizar interfaz visual de vuelo con números grandes
+            txtVz.text = "%.2f m/s".format(verticalSpeed)
+            txtVz.setTextColor(if (verticalSpeed >= 0) Color.GREEN else Color.RED)
+            txtAltitude.text = "Alt: %.1f m".format(altitude)
+            txtSpeed.text = "GPS: %.1f km/h".format(groundSpeed * 3.6f)
+            txtHeading.text = "Rumbo: %.0f°".format(heading)
         }
     }
 
