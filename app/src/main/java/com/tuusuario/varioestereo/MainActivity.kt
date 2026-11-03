@@ -32,26 +32,26 @@ class MainActivity : AppCompatActivity(), SensorEventListener, LocationListener 
     private var baselinePressure: Float = 1013.25f
     private var lastAltitude: Float = 0f
     private var lastTime: Long = 0
-    private var verticalSpeed: Float = 0f
+    private @Volatile var verticalSpeed: Float = 0f
     private var groundSpeed: Float = 0f
     private var heading: Float = 0f
 
-    // Motor de Audio Estéreo
+    // Motor de Audio Estéreo Continuo
     private var audioTrack: AudioTrack? = null
     private val sampleRate = 8000
-    private var lastBeepTime: Long = 0
+    private var audioThread: Thread? = null
+    private @Volatile var isAudioRunning = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
         textView = TextView(this).apply {
-            text = "Iniciando Vario Estéreo (GPS + Audio Estéreo)..."
+            text = "Iniciando Vario Estéreo..."
             textSize = 18f
             setPadding(40, 40, 40, 40)
         }
         setContentView(textView)
 
-        // Sensores y Ubicación
         sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
         pressureSensor = sensorManager.getDefaultSensor(Sensor.TYPE_PRESSURE)
         locationManager = getSystemService(Context.LOCATION_SERVICE) as LocationManager
@@ -84,11 +84,65 @@ class MainActivity : AppCompatActivity(), SensorEventListener, LocationListener 
                     .setChannelMask(AudioFormat.CHANNEL_OUT_STEREO)
                     .build()
             )
-            .setBufferSizeInBytes(bufferSize)
+            .setBufferSizeInBytes(bufferSize * 2)
             .setTransferMode(AudioTrack.MODE_STREAM)
             .build()
         
         audioTrack?.play()
+        startAudioLoop()
+    }
+
+    private fun startAudioLoop() {
+        isAudioRunning = true
+        audioThread = Thread {
+            val chunkDurationMs = 50 // trozos pequeños de 50ms
+            val numSamples = (sampleRate * chunkDurationMs) / 1000
+            val buffer = ByteArray(numSamples * 4) // Estéreo 16-bit (4 bytes por frame)
+            
+            var phase = 0.0
+
+            while (isAudioRunning) {
+                val vz = verticalSpeed
+                
+                // Si estamos ascendiendo o descendiendo activamente
+                if (abs(vz) > 0.05f) {
+                    val freq = if (vz > 0) {
+                        (400 + (vz * 200)).toInt().coerceIn(400, 1200)
+                    } else {
+                        (250 - (abs(vz) * 30)).toInt().coerceIn(150, 250)
+                    }
+
+                    // Generar onda estéreo balanceada (listo para paneo izquierdo/derecho en el futuro)
+                    val leftVol = 1.0f
+                    val rightVol = 1.0f
+
+                    for (i in 0 until numSamples) {
+                        val angle = 2.0 * Math.PI * freq * i / sampleRate + phase
+                        val baseSample = (sin(angle) * 15000).toInt() // Volumen moderado
+                        
+                        val leftSample = (baseSample * leftVol).toInt().toShort()
+                        val rightSample = (baseSample * rightVol).toInt().toShort()
+
+                        buffer[4 * i] = (leftSample.toInt() and 0x00ff).toByte()
+                        buffer[4 * i + 1] = ((leftSample.toInt() and 0xff00) ushr 8).toByte()
+                        buffer[4 * i + 2] = (rightSample.toInt() and 0x00ff).toByte()
+                        buffer[4 * i + 3] = ((rightSample.toInt() and 0xff00) ushr 8).toByte()
+                    }
+                    phase = (phase + 2.0 * Math.PI * freq * numSamples / sampleRate) % (2.0 * Math.PI)
+                    audioTrack?.write(buffer, 0, buffer.size)
+                } else {
+                    // Silencio si está estable, rellenando con ceros para mantener activo el stream de audio
+                    buffer.fill(0)
+                    audioTrack?.write(buffer, 0, buffer.size)
+                    try {
+                        Thread.sleep(50)
+                    } catch (e: InterruptedException) {
+                        break
+                    }
+                }
+            }
+        }
+        audioThread?.start()
     }
 
     private fun checkLocationPermission() {
@@ -122,11 +176,13 @@ class MainActivity : AppCompatActivity(), SensorEventListener, LocationListener 
         } catch (e: SecurityException) {
             e.printStackTrace()
         }
-        audioTrack?.stop()
     }
 
     override fun onDestroy() {
         super.onDestroy()
+        isAudioRunning = false
+        audioThread?.join(500)
+        audioTrack?.stop()
         audioTrack?.release()
     }
 
@@ -147,11 +203,8 @@ class MainActivity : AppCompatActivity(), SensorEventListener, LocationListener 
             lastAltitude = altitude
             lastTime = currentTime
 
-            // Lógica de Audio Estéreo (suena al subir y bajar para pruebas)
-            handleStereoVarioAudio(verticalSpeed, currentTime)
-
             textView.text = """
-                ✈️ VARIO ESTÉREO (GPS + AUDIO)
+                ✈️ VARIO ESTÉREO (HILO ACTIVO)
                 
                 Presión: %.2f hPa
                 Altitud: %.1f m
@@ -160,44 +213,6 @@ class MainActivity : AppCompatActivity(), SensorEventListener, LocationListener 
                 Rumbo: %.0f°
             """.trimIndent().format(pressure, altitude, verticalSpeed, groundSpeed * 3.6f, heading)
         }
-    }
-
-    private fun handleStereoVarioAudio(vz: Float, currentTime: Long) {
-        if (vz > 0.05f || vz < -0.05f) {
-            val absVz = abs(vz)
-            val interval = (400f / (absVz + 1f)).toLong().coerceIn(50, 400)
-            
-            if (currentTime - lastBeepTime > interval) {
-                val freq = if (vz > 0) {
-                    (400 + (vz * 200)).toInt().coerceIn(400, 1200)
-                } else {
-                    (300 - (absVz * 50)).toInt().coerceIn(150, 300)
-                }
-                
-                playStereoTone(freq, 100, leftVolume = 1.0f, rightVolume = 1.0f)
-                lastBeepTime = currentTime
-            }
-        }
-    }
-
-    private fun playStereoTone(freq: Int, durationMs: Int, leftVolume: Float, rightVolume: Float) {
-        val numSamples = (sampleRate * durationMs) / 1000
-        val buffer = ByteArray(numSamples * 4) // 4 bytes por frame en estéreo 16-bit
-        for (i in 0 until numSamples) {
-            val angle = 2.0 * Math.PI * i / (sampleRate / freq)
-            val baseSample = (sin(angle) * 32767).toInt()
-            
-            val leftSample = (baseSample * leftVolume).toInt().toShort()
-            val rightSample = (baseSample * rightVolume).toInt().toShort()
-
-            // Canal Izquierdo
-            buffer[4 * i] = (leftSample.toInt() and 0x00ff).toByte()
-            buffer[4 * i + 1] = ((leftSample.toInt() and 0xff00) ushr 8).toByte()
-            // Canal Derecho
-            buffer[4 * i + 2] = (rightSample.toInt() and 0x00ff).toByte()
-            buffer[4 * i + 3] = ((rightSample.toInt() and 0xff00) ushr 8).toByte()
-        }
-        audioTrack?.write(buffer, 0, buffer.size)
     }
 
     override fun onLocationChanged(location: Location) {
