@@ -17,6 +17,7 @@ import android.os.Bundle
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
+import kotlin.math.abs
 import kotlin.math.pow
 import kotlin.math.sin
 
@@ -146,7 +147,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener, LocationListener 
             lastAltitude = altitude
             lastTime = currentTime
 
-            // Generar audio estéreo (por defecto paneo centrado o sesgado según dinámica)
+            // Lógica de Audio Estéreo (suena al subir y bajar para pruebas)
             handleStereoVarioAudio(verticalSpeed, currentTime)
 
             textView.text = """
@@ -162,14 +163,17 @@ class MainActivity : AppCompatActivity(), SensorEventListener, LocationListener 
     }
 
     private fun handleStereoVarioAudio(vz: Float, currentTime: Long) {
-        if (vz > 0.1f) {
-            val interval = (400f / (vz + 1f)).toLong().coerceIn(50, 400)
+        if (vz > 0.05f || vz < -0.05f) {
+            val absVz = abs(vz)
+            val interval = (400f / (absVz + 1f)).toLong().coerceIn(50, 400)
             
             if (currentTime - lastBeepTime > interval) {
-                val freq = (400 + (vz * 200)).toInt().coerceIn(400, 1200)
+                val freq = if (vz > 0) {
+                    (400 + (vz * 200)).toInt().coerceIn(400, 1200)
+                } else {
+                    (300 - (absVz * 50)).toInt().coerceIn(150, 300)
+                }
                 
-                // Ejemplo de paneo estéreo: si quisieras inclinar el sonido hacia la izquierda o derecha 
-                // (por ahora balance 1.0 para ambos oídos, listo para integrar giros)
                 playStereoTone(freq, 100, leftVolume = 1.0f, rightVolume = 1.0f)
                 lastBeepTime = currentTime
             }
@@ -178,7 +182,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener, LocationListener 
 
     private fun playStereoTone(freq: Int, durationMs: Int, leftVolume: Float, rightVolume: Float) {
         val numSamples = (sampleRate * durationMs) / 1000
-        val buffer = ByteArray(numSamples * 4) // 4 bytes por frame en estéreo 16-bit (2 para Izq, 2 para Der)
+        val buffer = ByteArray(numSamples * 4) // 4 bytes por frame en estéreo 16-bit
         for (i in 0 until numSamples) {
             val angle = 2.0 * Math.PI * i / (sampleRate / freq)
             val baseSample = (sin(angle) * 32767).toInt()
