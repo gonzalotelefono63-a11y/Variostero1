@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#000000"
+    android:gravity="center"
+    android:orientation="vertical"
+    android:padding="24dp">
+
+    <TextView
+        android:id="@+id/txtAltitud"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="AGL: 0 m"
+        android:textColor="#00FF00"
+        android:textSize="48sp"
+        android:textStyle="bold" />
+
+    <TextView
+        android:id="@+id/txtVario"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="20dp"
+        android:text="0.0 m/s"
+        android:textColor="#FFFFFF"
+        android:textSize="36sp" />
+
+    <Button
+        android:id="@+id/btnIniciar"
+        android:layout_width="match_parent"
+        android:layout_height="80dp"
+        android:layout_marginTop="50dp"
+        text="Iniciar Vuelo"
+        android:text="Iniciar Vuelo"
+        android:textSize="22sp" />
+</LinearLayout>
