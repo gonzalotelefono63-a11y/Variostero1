@@ -150,11 +150,10 @@ class MainActivity : AppCompatActivity(), SensorEventListener, LocationListener 
     private fun startAudioLoop() {
         isAudioRunning = true
         audioThread = Thread {
-            val chunkDurationMs = 40
+            val chunkDurationMs = 30
             val numSamples = (sampleRate * chunkDurationMs) / 1000
             val buffer = ByteArray(numSamples * 4)
             var phase = 0.0
-            
             var accumulatedTimeMs: Long = 0
 
             while (isAudioRunning) {
@@ -164,23 +163,33 @@ class MainActivity : AppCompatActivity(), SensorEventListener, LocationListener 
                 val isHardDescending = vz < -1.0f
 
                 if (isAscending || isHardDescending) {
-                    val freq = if (isAscending) {
-                        (450 + (vz * 250)).toInt().coerceIn(450, 1400)
-                    } else {
-                        180
-                    }
-
                     if (isAscending) {
-                        val beepPeriod = (350f / (vz + 0.5f)).toLong().coerceIn(100, 350)
-                        val beepDuration = (beepPeriod * 0.6f).toLong()
+                        // Frecuencia del tono sube con la Vz (de ~500Hz en adelante)
+                        val freq = (480 + (vz * 220)).toInt().coerceIn(480, 1300)
+                        
+                        // Ritmo: a 1.0 m/s el periodo es de 1000ms (1 bip por segundo exacto)
+                        // A mayor Vz, el periodo se acorta (bips más frecuentes)
+                        val beepPeriod = (1000f / (vz * 0.9f + 0.4f)).toLong().coerceIn(120, 1000)
+                        val beepDuration = (beepPeriod * 0.5f).toLong() // 50% sonido, 50% silencio
 
                         val positionInCycle = accumulatedTimeMs % beepPeriod
                         val isPlayingBeep = positionInCycle < beepDuration
 
                         if (isPlayingBeep) {
+                            // Factor de envolvente (suaviza el inicio y final del bip para evitar chasquidos/tosquedad)
                             for (i in 0 until numSamples) {
-                                val angle = 2.0 * Math.PI * freq * i / sampleRate + phase
-                                val baseSample = (sin(angle) * 15000).toInt()
+                                val globalSampleIndex = (accumulatedTimeMs * sampleRate / 1000) + i
+                                val angle = 2.0 * Math.PI * freq * globalSampleIndex / sampleRate
+                                
+                                // Suavizado de volumen en los bordes del bip (Fade in/out de 5ms)
+                                val cycleProgress = (positionInCycle + (i * 1000 / sampleRate)).toFloat()
+                                val envelope = when {
+                                    cycleProgress < 15f -> cycleProgress / 15f // Fade in
+                                    cycleProgress > (beepDuration - 15f) -> (beepDuration - cycleProgress) / 15f // Fade out
+                                    else -> 1.0f
+                                }.coerceIn(0.0f, 1.0f)
+
+                                val baseSample = (sin(angle) * 12000 * envelope).toInt()
                                 
                                 val leftSample = baseSample.toShort()
                                 val rightSample = baseSample.toShort()
@@ -190,15 +199,16 @@ class MainActivity : AppCompatActivity(), SensorEventListener, LocationListener 
                                 buffer[4 * i + 2] = (rightSample.toInt() and 0x00ff).toByte()
                                 buffer[4 * i + 3] = ((rightSample.toInt() and 0xff00) ushr 8).toByte()
                             }
-                            phase = (phase + 2.0 * Math.PI * freq * numSamples / sampleRate) % (2.0 * Math.PI)
                         } else {
                             buffer.fill(0)
                         }
                         accumulatedTimeMs += chunkDurationMs
                     } else {
+                        // Descenso fuerte: tono grave continuo y suave
+                        val freq = 180
                         for (i in 0 until numSamples) {
                             val angle = 2.0 * Math.PI * freq * i / sampleRate + phase
-                            val baseSample = (sin(angle) * 10000).toInt()
+                            val baseSample = (sin(angle) * 8000).toInt()
                             
                             val leftSample = baseSample.toShort()
                             val rightSample = baseSample.toShort()
@@ -217,7 +227,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener, LocationListener 
                     buffer.fill(0)
                     audioTrack?.write(buffer, 0, buffer.size)
                     try {
-                        Thread.sleep(40)
+                        Thread.sleep(30)
                     } catch (e: InterruptedException) {
                         break
                     }
