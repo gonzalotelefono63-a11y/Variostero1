@@ -150,71 +150,63 @@ class MainActivity : AppCompatActivity(), SensorEventListener, LocationListener 
     private fun startAudioLoop() {
         isAudioRunning = true
         audioThread = Thread {
-            // Bloques de audio muy cortos (20ms) para respuesta ultrafluida estilo XCTrack
             val chunkDurationMs = 20
             val numSamples = (sampleRate * chunkDurationMs) / 1000
             val buffer = ByteArray(numSamples * 4)
-            var sampleCounter: Long = 0
+            var phase = 0.0
+            var cycleTimerMs: Long = 0
 
             while (isAudioRunning) {
                 val vz = verticalSpeed
-                
-                // Umbrales limpios de vuelo
                 val isAscending = vz > 0.3f
                 val isHardDescending = vz < -1.0f
 
-                for (i in 0 until numSamples) {
-                    val currentSampleIndex = sampleCounter + i
-                    val timeMs = (currentSampleIndex * 1000L) / sampleRate
+                // Frecuencia limpia y aguda estilo XCTrack
+                val freq = if (isAscending) {
+                    (700 + (vz * 350)).toInt().coerceIn(700, 1800)
+                } else {
+                    160
+                }
 
-                    var leftSample: Short = 0
-                    var rightSample: Short = 0
+                // Periodo y duración del bip estilo XCTrack (bips cortos y separados)
+                val beepPeriod = if (isAscending) (500f / (vz * 0.7f + 0.3f)).toLong().coerceIn(120, 500) else 0L
+                val beepDuration = if (isAscending) 90L else 0L // Bip fijo corto de 90ms para máxima nitidez
+
+                for (i in 0 until numSamples) {
+                    var sampleVal = 0.0
 
                     if (isAscending) {
-                        // Tono base más agudo y limpio (estilo XCTrack: ~700Hz a 1600Hz)
-                        val freq = (700 + (vz * 300)).toInt().coerceIn(700, 1800)
-                        
-                        // Cadencia de bips: A 1.0 m/s da un pitido limpio y marcado por segundo
-                        // A mayor Vz, el periodo se acorta y los bips se vuelven frenéticos
-                        val beepPeriod = (600f / (vz * 0.8f + 0.4f)).toLong().coerceIn(80, 600)
-                        val beepDuration = (beepPeriod * 0.555f).toLong() // Duración activa del bip
-
-                        val positionInCycle = timeMs % beepPeriod
-
+                        val positionInCycle = cycleTimerMs % beepPeriod
                         if (positionInCycle < beepDuration) {
-                            // Suavizado de bordes (Envelope / Fade in-out de 3ms) para eliminar chasquidos
-                            val progressInBeep = positionInCycle.toFloat()
+                            // Envolvente ultrarrápida (Fade in/out de 4ms) para evitar chasquidos secos
                             val envelope = when {
-                                progressInBeep < 3f -> progressInBeep / 3f
-                                progressInBeep > (beepDuration - 3f) -> (beepDuration - progressInBeep) / 3f
+                                positionInCycle < 4f -> positionInCycle / 4f
+                                positionInCycle > (beepDuration - 4f) -> (beepDuration - positionInCycle) / 4f
                                 else -> 1.0f
                             }.coerceIn(0.0f, 1.0f)
 
-                            val angle = 2.0 * Math.PI * freq * currentSampleIndex / sampleRate
-                            val sampleVal = (sin(angle) * 14000 * envelope).toInt().toShort()
-                            
-                            leftSample = sampleVal
-                            rightSample = sampleVal
+                            sampleVal = sin(phase) * 12000.0 * envelope
                         }
+                        cycleTimerMs += (1000L / sampleRate)
                     } else if (isHardDescending) {
-                        // Descenso pronunciado: tono grave continuo y suave
-                        val freq = 160
-                        val angle = 2.0 * Math.PI * freq * currentSampleIndex / sampleRate
-                        val sampleVal = (sin(angle) * 6000).toInt().toShort()
-                        
-                        leftSample = sampleVal
-                        rightSample = sampleVal
+                        sampleVal = sin(phase) * 5000.0
                     }
 
-                    // Escribir canales L y R entrelazados (PCM 16-bit estéreo)
-                    buffer[4 * i] = (leftSample.toInt() and 0x00ff).toByte()
-                    buffer[4 * i + 1] = ((leftSample.toInt() and 0xff00) ushr 8).toByte()
-                    buffer[4 * i + 2] = (rightSample.toInt() and 0x00ff).toByte()
-                    buffer[4 * i + 3] = ((rightSample.toInt() and 0xff00) ushr 8).toByte()
+                    // Acumulación de fase continua sin saltos de onda
+                    phase += 2.0 * Math.PI * freq.toDouble() / sampleRate
+                    if (phase > 2.0 * Math.PI) {
+                        phase -= 2.0 * Math.PI
+                    }
+
+                    val s = sampleVal.toInt().toShort()
+                    // Estéreo simétrico (ambos canales idénticos por ahora)
+                    buffer[4 * i] = (s.toInt() and 0x00ff).toByte()
+                    buffer[4 * i + 1] = ((s.toInt() and 0xff00) ushr 8).toByte()
+                    buffer[4 * i + 2] = (s.toInt() and 0x00ff).toByte()
+                    buffer[4 * i + 3] = ((s.toInt() and 0xff00) ushr 8).toByte()
                 }
 
                 audioTrack?.write(buffer, 0, buffer.size)
-                sampleCounter += numSamples
             }
         }
         audioThread?.start()
