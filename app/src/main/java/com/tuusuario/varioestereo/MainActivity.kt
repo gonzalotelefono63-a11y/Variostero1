@@ -48,7 +48,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener, LocationListener 
     private var groundSpeed: Float = 0f
     private var heading: Float = 0f
 
-    // Motor de Audio Estéreo Estilo XCTrack
+    // Motor de Audio Estéreo Estilo XCTrack Preciso
     private var audioTrack: AudioTrack? = null
     private val sampleRate = 8000
     private var audioThread: Thread? = null
@@ -154,7 +154,6 @@ class MainActivity : AppCompatActivity(), SensorEventListener, LocationListener 
             val numSamples = (sampleRate * chunkDurationMs) / 1000
             val buffer = ByteArray(numSamples * 4)
             var phase = 0.0
-            var cycleTimerMs: Long = 0
 
             while (isAudioRunning) {
                 val vz = verticalSpeed
@@ -163,43 +162,45 @@ class MainActivity : AppCompatActivity(), SensorEventListener, LocationListener 
 
                 // Frecuencia limpia y aguda estilo XCTrack
                 val freq = if (isAscending) {
-                    (700 + (vz * 350)).toInt().coerceIn(700, 1800)
+                    (700 + (vz * 300)).toInt().coerceIn(700, 1800)
                 } else {
                     160
                 }
 
-                // Periodo y duración del bip estilo XCTrack (bips cortos y separados)
-                val beepPeriod = if (isAscending) (500f / (vz * 0.7f + 0.3f)).toLong().coerceIn(120, 500) else 0L
-                val beepDuration = if (isAscending) 90L else 0L // Bip fijo corto de 90ms para máxima nitidez
+                // Cálculo exacto del periodo usando reloj real (ms)
+                // A 1.0 m/s el periodo total es de ~500ms, con un bip fijo de 100ms (espacio limpio garantizado)
+                val beepPeriod = if (isAscending) (500f / (vz * 0.7f + 0.3f)).toLong().coerceIn(150, 600) else 0L
+                val beepDuration = 100L // 100ms de sonido puro y seco
+
+                val nowMs = System.currentTimeMillis()
+                val positionInCycle = if (beepPeriod > 0) nowMs % beepPeriod else -1L
+                val isPlayingBeep = isAscending && (positionInCycle < beepDuration)
 
                 for (i in 0 until numSamples) {
                     var sampleVal = 0.0
 
-                    if (isAscending) {
-                        val positionInCycle = cycleTimerMs % beepPeriod
-                        if (positionInCycle < beepDuration) {
-                            // Envolvente ultrarrápida (Fade in/out de 4ms) para evitar chasquidos secos
-                            val envelope = when {
-                                positionInCycle < 4f -> positionInCycle / 4f
-                                positionInCycle > (beepDuration - 4f) -> (beepDuration - positionInCycle) / 4f
-                                else -> 1.0f
-                            }.coerceIn(0.0f, 1.0f)
+                    if (isPlayingBeep) {
+                        // Envolvente ultrarrápida (Fade in/out de 5ms) para evitar chasquidos al abrir/cerrar
+                        val progressInBeep = (positionInCycle + (i * 20 / numSamples)).toFloat()
+                        val envelope = when {
+                            progressInBeep < 5f -> progressInBeep / 5f
+                            progressInBeep > (beepDuration - 5f) -> (beepDuration - progressInBeep) / 5f
+                            else -> 1.0f
+                        }.coerceIn(0.0f, 1.0f)
 
-                            sampleVal = sin(phase) * 12000.0 * envelope
-                        }
-                        cycleTimerMs += (1000L / sampleRate)
+                        sampleVal = sin(phase) * 12000.0 * envelope
                     } else if (isHardDescending) {
                         sampleVal = sin(phase) * 5000.0
                     }
 
-                    // Acumulación de fase continua sin saltos de onda
+                    // Acumulación de fase continua
                     phase += 2.0 * Math.PI * freq.toDouble() / sampleRate
                     if (phase > 2.0 * Math.PI) {
                         phase -= 2.0 * Math.PI
                     }
 
                     val s = sampleVal.toInt().toShort()
-                    // Estéreo simétrico (ambos canales idénticos por ahora)
+                    // Estéreo simétrico
                     buffer[4 * i] = (s.toInt() and 0x00ff).toByte()
                     buffer[4 * i + 1] = ((s.toInt() and 0xff00) ushr 8).toByte()
                     buffer[4 * i + 2] = (s.toInt() and 0x00ff).toByte()
@@ -207,6 +208,13 @@ class MainActivity : AppCompatActivity(), SensorEventListener, LocationListener 
                 }
 
                 audioTrack?.write(buffer, 0, buffer.size)
+                
+                // Pequeña pausa para no saturar el hilo
+                try {
+                    Thread.sleep(10)
+                } catch (e: InterruptedException) {
+                    break
+                }
             }
         }
         audioThread?.start()
