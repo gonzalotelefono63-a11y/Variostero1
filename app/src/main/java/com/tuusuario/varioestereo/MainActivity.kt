@@ -32,16 +32,15 @@ class MainActivity : AppCompatActivity(), SensorEventListener, LocationListener 
     private var pressureSensor: Sensor? = null
     private lateinit var locationManager: LocationManager
     
-    // Elementos de la Interfaz Visual (Dashboard)
+    // Interfaz Visual (Dashboard)
     private lateinit var txtVz: TextView
     private lateinit var txtAltitude: TextView
     private lateinit var txtSpeed: TextView
     private lateinit var txtHeading: TextView
 
-    // WakeLock para evitar que la pantalla se apague en vuelo
     private var wakeLock: PowerManager.WakeLock? = null
 
-    // Variables de vuelo
+    // Variables de vuelo y filtrado avanzado
     private var baselinePressure: Float = 1013.25f
     private var lastAltitude: Float = 0f
     private var lastTime: Long = 0
@@ -49,7 +48,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener, LocationListener 
     private var groundSpeed: Float = 0f
     private var heading: Float = 0f
 
-    // Motor de Audio Estéreo Continuo y Paneo
+    // Motor de Audio Estéreo Continuo
     private var audioTrack: AudioTrack? = null
     private val sampleRate = 8000
     private var audioThread: Thread? = null
@@ -59,7 +58,6 @@ class MainActivity : AppCompatActivity(), SensorEventListener, LocationListener 
         super.onCreate(savedInstanceState)
         
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        
         val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
         wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "VarioEstereo::FlightWakeLock")
         wakeLock?.acquire()
@@ -160,18 +158,19 @@ class MainActivity : AppCompatActivity(), SensorEventListener, LocationListener 
             while (isAudioRunning) {
                 val vz = verticalSpeed
                 
-                if (abs(vz) > 0.05f) {
+                // Zona muerta ampliada (ignora ruido menor a +/- 0.15 m/s en reposo)
+                if (abs(vz) > 0.15f) {
                     val freq = if (vz > 0) {
                         (400 + (vz * 200)).toInt().coerceIn(400, 1200)
                     } else {
                         (250 - (abs(vz) * 30)).toInt().coerceIn(150, 250)
                     }
 
-                    // PANEO ESTÉREO DIFERENCIAL:
-                    // Aquí puedes ajustar el balance entre el canal izquierdo y derecho (valores de 0.0 a 1.0).
-                    // Ejemplo base simétrico (ambos oídos). A futuro mapearemos esto con la posición de la térmica.
-                    val leftVol = 1.0f
-                    val rightVol = 1.0f
+                    // PANEO ESTÉREO DIFERENCIAL DE PRUEBA:
+                    // Aquí desbalanceamos los canales para notar la diferencia entre izquierdo y derecho.
+                    // Si vz es positivo, inclinamos hacia la izquierda (Izq: 1.0, Der: 0.2), si baja hacia la derecha.
+                    val leftVol = if (vz > 0) 1.0f else 0.2f
+                    val rightVol = if (vz > 0) 0.2f else 1.0f
 
                     for (i in 0 until numSamples) {
                         val angle = 2.0 * Math.PI * freq * i / sampleRate + phase
@@ -255,7 +254,8 @@ class MainActivity : AppCompatActivity(), SensorEventListener, LocationListener 
                 val dt = (currentTime - lastTime) / 1000.0f
                 if (dt > 0) {
                     val instantaneousVz = (altitude - lastAltitude) / dt
-                    verticalSpeed = (0.2f * instantaneousVz) + (0.8f * verticalSpeed)
+                    // Filtro exponencial más suave para eliminar el ruido estático de la mesa
+                    verticalSpeed = (0.15f * instantaneousVz) + (0.85f * verticalSpeed)
                 }
             }
 
