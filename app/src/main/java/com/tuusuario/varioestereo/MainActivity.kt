@@ -155,7 +155,6 @@ class MainActivity : AppCompatActivity(), SensorEventListener, LocationListener 
             val buffer = ByteArray(numSamples * 4)
             var phase = 0.0
             
-            // Variables para el ritmo de los bips (Beep rhythm)
             var accumulatedTimeMs: Long = 0
 
             while (isAudioRunning) {
@@ -168,15 +167,12 @@ class MainActivity : AppCompatActivity(), SensorEventListener, LocationListener 
                     val freq = if (isAscending) {
                         (450 + (vz * 250)).toInt().coerceIn(450, 1400)
                     } else {
-                        // Tono grave continuo para descenso
                         180
                     }
 
                     if (isAscending) {
-                        // Ritmo de bips modulado por Vz (cuanto más sube, más corto y rápido es el bip)
-                        // Frecuencia de repetición del bip (ej: de 300ms con Formidable Vz a 150ms con Vz fuerte)
-                        constval beepPeriod = (350f / (vz + 0.5f)).toLong().coerceIn(100, 350)
-                        constval beepDuration = (beepPeriod * 0.6f).toLong() // 60% sonido, 40% silencio
+                        val beepPeriod = (350f / (vz + 0.5f)).toLong().coerceIn(100, 350)
+                        val beepDuration = (beepPeriod * 0.6f).toLong()
 
                         val positionInCycle = accumulatedTimeMs % beepPeriod
                         val isPlayingBeep = positionInCycle < beepDuration
@@ -200,7 +196,6 @@ class MainActivity : AppCompatActivity(), SensorEventListener, LocationListener 
                         }
                         accumulatedTimeMs += chunkDurationMs
                     } else {
-                        // Descenso fuerte: sonido ronco y continuo
                         for (i in 0 until numSamples) {
                             val angle = 2.0 * Math.PI * freq * i / sampleRate + phase
                             val baseSample = (sin(angle) * 10000).toInt()
