@@ -158,19 +158,17 @@ class MainActivity : AppCompatActivity(), SensorEventListener, LocationListener 
             while (isAudioRunning) {
                 val vz = verticalSpeed
                 
-                // Zona muerta ampliada (ignora ruido menor a +/- 0.15 m/s en reposo)
-                if (abs(vz) > 0.15f) {
+                // Zona muerta más estricta (ignora ruidos menores a +/- 0.25 m/s en la mesa)
+                if (abs(vz) > 0.25f) {
                     val freq = if (vz > 0) {
                         (400 + (vz * 200)).toInt().coerceIn(400, 1200)
                     } else {
                         (250 - (abs(vz) * 30)).toInt().coerceIn(150, 250)
                     }
 
-                    // PANEO ESTÉREO DIFERENCIAL DE PRUEBA:
-                    // Aquí desbalanceamos los canales para notar la diferencia entre izquierdo y derecho.
-                    // Si vz es positivo, inclinamos hacia la izquierda (Izq: 1.0, Der: 0.2), si baja hacia la derecha.
-                    val leftVol = if (vz > 0) 1.0f else 0.2f
-                    val rightVol = if (vz > 0) 0.2f else 1.0f
+                    // Audio equilibrado en ambos oídos (Estéreo centrado para pruebas limpias)
+                    val leftVol = 1.0f
+                    val rightVol = 1.0f
 
                     for (i in 0 until numSamples) {
                         val angle = 2.0 * Math.PI * freq * i / sampleRate + phase
@@ -254,7 +252,6 @@ class MainActivity : AppCompatActivity(), SensorEventListener, LocationListener 
                 val dt = (currentTime - lastTime) / 1000.0f
                 if (dt > 0) {
                     val instantaneousVz = (altitude - lastAltitude) / dt
-                    // Filtro exponencial más suave para eliminar el ruido estático de la mesa
                     verticalSpeed = (0.15f * instantaneousVz) + (0.85f * verticalSpeed)
                 }
             }
