@@ -158,15 +158,17 @@ class MainActivity : AppCompatActivity(), SensorEventListener, LocationListener 
             while (isAudioRunning) {
                 val vz = verticalSpeed
                 
-                // Zona muerta más estricta (ignora ruidos menores a +/- 0.25 m/s en la mesa)
-                if (abs(vz) > 0.25f) {
-                    val freq = if (vz > 0) {
+                // Umbral ajustado: subida activa a partir de +0.4 m/s, descenso fuerte si es menor a -1.0 m/s
+                val isAscending = vz > 0.4f
+                val isHardDescending = vz < -1.0f
+
+                if (isAscending || isHardDescending) {
+                    val freq = if (isAscending) {
                         (400 + (vz * 200)).toInt().coerceIn(400, 1200)
                     } else {
-                        (250 - (abs(vz) * 30)).toInt().coerceIn(150, 250)
+                        (200 - (abs(vz) * 20)).toInt().coerceIn(120, 200)
                     }
 
-                    // Audio equilibrado en ambos oídos (Estéreo centrado para pruebas limpias)
                     val leftVol = 1.0f
                     val rightVol = 1.0f
 
