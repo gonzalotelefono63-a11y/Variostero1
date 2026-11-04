@@ -49,7 +49,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener, LocationListener 
     private var groundSpeed: Float = 0f
     private var heading: Float = 0f
 
-    // Motor de Audio Estéreo Continuo
+    // Motor de Audio Estéreo Continuo y Paneo
     private var audioTrack: AudioTrack? = null
     private val sampleRate = 8000
     private var audioThread: Thread? = null
@@ -58,14 +58,12 @@ class MainActivity : AppCompatActivity(), SensorEventListener, LocationListener 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
-        // Mantener la pantalla encendida permanentemente (WakeLock de pantalla)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         
         val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
         wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "VarioEstereo::FlightWakeLock")
         wakeLock?.acquire()
 
-        // Construir Dashboard visual de alto contraste para vuelo
         setupDashboardUI()
 
         sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
@@ -169,8 +167,9 @@ class MainActivity : AppCompatActivity(), SensorEventListener, LocationListener 
                         (250 - (abs(vz) * 30)).toInt().coerceIn(150, 250)
                     }
 
-                    // Preparado para estéreo diferencial: aquí en el futuro ajustaremos 
-                    // leftVol y rightVol según la posición relativa de la térmica.
+                    // PANEO ESTÉREO DIFERENCIAL:
+                    // Aquí puedes ajustar el balance entre el canal izquierdo y derecho (valores de 0.0 a 1.0).
+                    // Ejemplo base simétrico (ambos oídos). A futuro mapearemos esto con la posición de la térmica.
                     val leftVol = 1.0f
                     val rightVol = 1.0f
 
@@ -263,7 +262,6 @@ class MainActivity : AppCompatActivity(), SensorEventListener, LocationListener 
             lastAltitude = altitude
             lastTime = currentTime
 
-            // Actualizar interfaz visual de vuelo con números grandes
             txtVz.text = "%.2f m/s".format(verticalSpeed)
             txtVz.setTextColor(if (verticalSpeed >= 0) Color.GREEN else Color.RED)
             txtAltitude.text = "Alt: %.1f m".format(altitude)
